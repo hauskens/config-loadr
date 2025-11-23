@@ -67,7 +67,10 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
     let mut docs_impl_fields = Vec::new();
 
     for field in fields {
-        let field_name = field.ident.as_ref().unwrap();
+        let field_name = field
+            .ident
+            .as_ref()
+            .expect("BUG: field must have a name (already validated that struct has named fields)");
         let field_vis = &field.vis;
         let field_type = &field.ty;
         let field_attrs = &field.attrs;
@@ -166,7 +169,7 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         } else {
             quote! {
                 #(#cfg_attrs)*
-                #field_name: #field_name.unwrap()
+                #field_name: #field_name.expect(concat!("BUG: field '", stringify!(#field_name), "' should have a value after finish()"))
             }
         };
         load_impl_unwraps.push(unwrap_code);
@@ -182,10 +185,10 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             // Keep the attribute unless it's our custom ones
             if attr.path().is_ident("allow") {
                 // Check if it's allow(missing_docs)
-                if let Ok(ident) = attr.parse_args::<syn::Ident>()
-                    && ident == "missing_docs"
-                {
-                    return false;
+                if let Ok(ident) = attr.parse_args::<syn::Ident>() {
+                    if ident == "missing_docs" {
+                        return false;
+                    }
                 }
             }
             true
@@ -379,13 +382,16 @@ fn extract_inner_type(ty: &Type) -> &Type {
 
 /// Extract the inner type from Option<T>, returns (is_option, inner_type)
 fn extract_option_type(ty: &Type) -> (bool, &Type) {
-    if let Type::Path(type_path) = ty
-        && let Some(segment) = type_path.path.segments.last()
-        && segment.ident == "Option"
-        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
-        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
-    {
-        return (true, inner_ty);
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "Option" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                        return (true, inner_ty);
+                    }
+                }
+            }
+        }
     }
     (false, ty)
 }
