@@ -1,0 +1,26 @@
+[workspace]
+members = ["macros"]
+
+[workspace.package]
+version = "0.8.0"
+edition = "2024"
+license = "MIT"
+
+[package]
+name = "config-loadr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+colored = "3"
+config-loadr-macros = { path = "macros" }
+dotenvy = "0.15"
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
