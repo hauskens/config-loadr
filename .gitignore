@@ -20,6 +20,9 @@ target
 *.swo
 *~
 
+# Generated pre-commit config
+.pre-commit-config.yaml
+
 # OS files
 .DS_Store
 Thumbs.db
