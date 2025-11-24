@@ -8,7 +8,7 @@ pub mod macros;
 pub use builder::{ConfigBuilder, env_or_default, env_or_option, env_parse, env_required};
 pub use environment::Environment;
 pub use error::ConfigError;
-pub use field::ConfigField;
+pub use field::{ConfigField, ConfigFieldMeta};
 
 // Re-export macro
 pub use config_loadr_macros::define_config;
@@ -19,7 +19,7 @@ pub trait Load: Sized {
     fn load() -> Self;
 
     /// Load configuration from environment, returning errors instead of panicking
-    fn load_or_error() -> Result<Self, Vec<ConfigError>>;
+    fn new() -> Result<Self, Vec<ConfigError>>;
 
     /// Create a builder for documentation generation (without loading values)
     fn builder_for_docs() -> ConfigBuilder;

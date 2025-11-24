@@ -1,4 +1,4 @@
-use crate::{error::ConfigError, field::ConfigField};
+use crate::error::ConfigError;
 use colored::Colorize;
 use std::{env, fs, path::Path, str::FromStr};
 
@@ -45,13 +45,9 @@ pub fn env_required<T: FromStr + std::fmt::Display + Clone>(
     key: &'static str,
     description: &'static str,
     example: T,
-) -> Result<ConfigField<T>, ConfigError> {
+) -> Result<T, ConfigError> {
     let example_str = example.to_string();
-
-    match env_parse(key, description, example_str.as_ref()) {
-        Ok(value) => Ok(ConfigField::required(key, description, example, value)),
-        Err(e) => Err(e),
-    }
+    env_parse(key, description, example_str.as_ref())
 }
 
 /// Loads an optional environment variable with a default value
@@ -62,25 +58,31 @@ pub fn env_or_default<T: FromStr + std::fmt::Display + Clone>(
     key: &'static str,
     description: &'static str,
     default: T,
-) -> Result<ConfigField<T>, ConfigError> {
+) -> Result<T, ConfigError> {
     let default_str = default.to_string();
-    let value = match env_parse(key, description, Some(default_str.as_str())) {
-        Ok(value) => value,
-        Err(ConfigError::MissingEnvVar { .. }) => default.clone(),
-        Err(e) => return Err(e), // Propagate InvalidEnvironment and other errors
-    };
-    Ok(ConfigField::optional(key, description, default, value))
+    match env_parse(key, description, Some(default_str.as_str())) {
+        Ok(value) => Ok(value),
+        Err(ConfigError::MissingEnvVar { .. }) => Ok(default),
+        Err(e) => Err(e), // Propagate InvalidEnvironment and other errors
+    }
 }
 
 /// Load an optional environment variable, returning None if missing
+///
+/// Returns Ok(None) if the environment variable is not set.
+/// Returns Ok(Some(value)) if the environment variable is set and parses successfully.
+/// Returns Err if the environment variable is set but cannot be parsed.
 pub fn env_or_option<T: FromStr>(
     key: &'static str,
     description: &'static str,
     example: impl Into<Option<&'static str>>,
-) -> ConfigField<Option<T>> {
+) -> Result<Option<T>, ConfigError> {
     let example_str = example.into();
-    let value = env_parse(key, description, example_str).ok();
-    ConfigField::optional(key, description, None, value)
+    match env_parse(key, description, example_str) {
+        Ok(value) => Ok(Some(value)),
+        Err(ConfigError::MissingEnvVar { .. }) => Ok(None),
+        Err(e) => Err(e), // Propagate parse errors
+    }
 }
 
 /// Helper to format multiple configuration errors into a panic message
@@ -129,7 +131,7 @@ impl ConfigBuilder {
         key: &'static str,
         description: &'static str,
         example: T,
-    ) -> Option<ConfigField<T>> {
+    ) -> Option<T> {
         // Capture metadata
         self.fields.push(FieldMetadata {
             key: key.to_string(),
@@ -139,7 +141,7 @@ impl ConfigBuilder {
         });
 
         match env_required(key, description, example) {
-            Ok(field) => Some(field),
+            Ok(value) => Some(value),
             Err(e) => {
                 self.errors.push(e);
                 None
@@ -155,7 +157,7 @@ impl ConfigBuilder {
         key: &'static str,
         description: &'static str,
         default: T,
-    ) -> Option<ConfigField<T>> {
+    ) -> Option<T> {
         // Capture metadata
         self.fields.push(FieldMetadata {
             key: key.to_string(),
@@ -165,7 +167,7 @@ impl ConfigBuilder {
         });
 
         match env_or_default(key, description, default) {
-            Ok(field) => Some(field),
+            Ok(value) => Some(value),
             Err(e) => {
                 self.errors.push(e);
                 None
@@ -174,12 +176,15 @@ impl ConfigBuilder {
     }
 
     /// Load an optional field that may be None
+    ///
+    /// Returns None if the environment variable is not set, or Some(value) if it is.
+    /// Collects an error if the environment variable is set but cannot be parsed.
     pub fn optional<T: FromStr>(
         &mut self,
         key: &'static str,
         description: &'static str,
         example: impl Into<Option<&'static str>>,
-    ) -> ConfigField<Option<T>> {
+    ) -> Option<T> {
         let example_str = example.into();
 
         // Capture metadata
@@ -190,7 +195,13 @@ impl ConfigBuilder {
             required: false,
         });
 
-        env_or_option(key, description, example_str)
+        match env_or_option(key, description, example_str) {
+            Ok(value) => value,
+            Err(e) => {
+                self.errors.push(e);
+                None
+            }
+        }
     }
 
     /// Validate that all configuration fields loaded successfully
@@ -272,6 +283,7 @@ impl Default for ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field::ConfigFieldMeta;
 
     #[test]
     fn test_builder_new() {
@@ -399,26 +411,24 @@ mod tests {
     }
 
     #[test]
-    fn test_config_field_metadata_preserved() {
-        // Test that ConfigField created by helpers has correct metadata
-        let field = ConfigField::required("TEST_KEY", "Test description", 123, 123);
+    fn test_config_field_meta_preserved() {
+        // Test that ConfigFieldMeta has correct metadata structure
+        let field = ConfigFieldMeta::required("TEST_KEY", "Test description", 123);
 
         assert_eq!(field.key, "TEST_KEY");
         assert_eq!(field.description, "Test description");
         assert_eq!(field.default, 123);
         assert!(field.required);
-        assert_eq!(field.value, 123);
     }
 
     #[test]
-    fn test_optional_field_metadata() {
-        let field = ConfigField::optional("OPT_KEY", "Optional key", "default", "default");
+    fn test_optional_field_meta() {
+        let field = ConfigFieldMeta::optional("OPT_KEY", "Optional key", "default");
 
         assert_eq!(field.key, "OPT_KEY");
         assert_eq!(field.description, "Optional key");
         assert_eq!(field.default, "default");
         assert!(!field.required);
-        assert_eq!(field.value, "default");
     }
 
     #[test]

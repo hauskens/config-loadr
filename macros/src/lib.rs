@@ -61,10 +61,12 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         }
     };
 
-    let mut field_defs = Vec::new();
+    let mut value_field_defs = Vec::new(); // For Config struct (direct values)
+    let mut meta_field_defs = Vec::new(); // For ConfigMeta struct (metadata)
     let mut load_impl_fields = Vec::new();
     let mut load_impl_unwraps = Vec::new();
     let mut docs_impl_fields = Vec::new();
+    let mut meta_field_inits = Vec::new(); // For initializing ConfigMeta fields
 
     for field in fields {
         let field_name = field
@@ -84,11 +86,26 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
             .filter(|attr| attr.path().is_ident("cfg"))
             .collect();
 
-        // Generate the field definition with ConfigField wrapper
+        // Generate direct value field for Config struct
         let inner_type = extract_inner_type(field_type);
-        field_defs.push(quote! {
+        value_field_defs.push(quote! {
             #(#cfg_attrs)*
-            #field_vis #field_name: ::config_loadr::ConfigField<#field_type>
+            #field_vis #field_name: #field_type
+        });
+
+        // For optional fields (Option<T>), metadata should use the inner type T
+        // For other fields, use the full type
+        let (is_option, opt_inner_type) = extract_option_type(field_type);
+        let meta_type = if is_option {
+            opt_inner_type
+        } else {
+            field_type
+        };
+
+        // Generate metadata field for ConfigMeta struct
+        meta_field_defs.push(quote! {
+            #(#cfg_attrs)*
+            #field_vis #field_name: ::config_loadr::ConfigFieldMeta<#meta_type>
         });
 
         // Generate load implementation code
@@ -130,13 +147,6 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
                 }
             }
             FieldMode::Optional => {
-                let example = config.example.as_ref().ok_or_else(|| {
-                    syn::Error::new_spanned(
-                        field,
-                        "optional fields must have an #[example] attribute",
-                    )
-                })?;
-
                 // For optional fields, use the inner type (without Option wrapper)
                 let opt_inner = if is_option {
                     actual_type
@@ -147,12 +157,14 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
                     ));
                 };
 
+                // Example is optional - only used for documentation
+                // Type is inferred from the field's Option<T> annotation
                 quote! {
                     #(#cfg_attrs)*
                     let #field_name = builder.optional::<#opt_inner>(
                         #env_var,
                         #description,
-                        #example,
+                        None,
                     );
                 }
             }
@@ -160,19 +172,64 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 
         load_impl_fields.push(load_code.clone());
 
-        // For optional fields, we don't unwrap (they're already ConfigField<Option<T>>)
+        // For all fields, unwrap the Option<T> returned by builder
         let unwrap_code = if matches!(config.mode, FieldMode::Optional) {
+            // Optional fields return Option<T> from builder, assign directly
             quote! {
                 #(#cfg_attrs)*
                 #field_name
             }
         } else {
+            // Required and default fields return Option<T>, unwrap them
             quote! {
                 #(#cfg_attrs)*
                 #field_name: #field_name.expect(concat!("BUG: field '", stringify!(#field_name), "' should have a value after finish()"))
             }
         };
         load_impl_unwraps.push(unwrap_code);
+
+        // Generate metadata field initialization
+        let meta_init = match &config.mode {
+            FieldMode::Required => {
+                let example = config.example.as_ref().unwrap();
+                quote! {
+                    #(#cfg_attrs)*
+                    #field_name: ::config_loadr::ConfigFieldMeta::required(
+                        #env_var,
+                        #description,
+                        #example,
+                    )
+                }
+            }
+            FieldMode::Default(default_expr) => {
+                quote! {
+                    #(#cfg_attrs)*
+                    #field_name: ::config_loadr::ConfigFieldMeta::optional(
+                        #env_var,
+                        #description,
+                        #default_expr,
+                    )
+                }
+            }
+            FieldMode::Optional => {
+                // Use example if provided, otherwise use Default::default()
+                let example_value = config
+                    .example
+                    .as_ref()
+                    .map(|ex| quote! { #ex })
+                    .unwrap_or_else(|| quote! { Default::default() });
+
+                quote! {
+                    #(#cfg_attrs)*
+                    #field_name: ::config_loadr::ConfigFieldMeta::optional(
+                        #env_var,
+                        #description,
+                        #example_value,
+                    )
+                }
+            }
+        };
+        meta_field_inits.push(meta_init);
 
         // Same load code for docs
         docs_impl_fields.push(load_code);
@@ -195,12 +252,30 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         })
         .collect();
 
-    // Generate the struct definition
+    // Generate the Config struct definition (with direct values)
     let struct_def = quote! {
         #(#filtered_attrs)*
         #vis struct #struct_name {
-            #(#field_defs),*
+            #(#value_field_defs),*
         }
+    };
+
+    // Generate the ConfigMeta struct name and definition
+    let meta_struct_name = syn::Ident::new(&format!("{}Meta", struct_name), struct_name.span());
+    let meta_struct_def = quote! {
+        #[allow(missing_docs)]
+        #vis struct #meta_struct_name {
+            #(#meta_field_defs),*
+        }
+    };
+
+    // Generate static metadata instance with unique name per config
+    let meta_static_name = syn::Ident::new(
+        &format!("__CONFIG_META_{}", struct_name.to_string().to_uppercase()),
+        struct_name.span(),
+    );
+    let meta_static = quote! {
+        static #meta_static_name: ::std::sync::OnceLock<#meta_struct_name> = ::std::sync::OnceLock::new();
     };
 
     // Generate Load trait implementation
@@ -219,7 +294,7 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
                 }
             }
 
-            fn load_or_error() -> Result<Self, Vec<::config_loadr::ConfigError>> {
+            fn new() -> Result<Self, Vec<::config_loadr::ConfigError>> {
                 let _ = dotenvy::dotenv();
                 let mut builder = ::config_loadr::ConfigBuilder::new();
 
@@ -243,9 +318,45 @@ fn generate_config(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
         }
     };
 
+    // Generate inherent methods that delegate to the trait implementation
+    // This allows users to call Config::load() without importing the Load trait
+    let inherent_impl = quote! {
+        impl #struct_name {
+            /// Loads the configuration from environment variables.
+            /// Panics if any required variables are missing or invalid.
+            #vis fn load() -> Self {
+                <Self as ::config_loadr::Load>::load()
+            }
+
+            /// Loads the configuration from environment variables.
+            /// Returns an error if any required variables are missing or invalid.
+            #vis fn new() -> Result<Self, Vec<::config_loadr::ConfigError>> {
+                <Self as ::config_loadr::Load>::new()
+            }
+
+            /// Creates a builder for documentation purposes only.
+            #[doc(hidden)]
+            #vis fn builder_for_docs() -> ::config_loadr::ConfigBuilder {
+                <Self as ::config_loadr::Load>::builder_for_docs()
+            }
+
+            /// Returns a reference to the configuration metadata.
+            #vis fn metadata() -> &'static #meta_struct_name {
+                #meta_static_name.get_or_init(|| {
+                    #meta_struct_name {
+                        #(#meta_field_inits),*
+                    }
+                })
+            }
+        }
+    };
+
     Ok(quote! {
         #struct_def
+        #meta_struct_def
+        #meta_static
         #load_impl
+        #inherent_impl
     })
 }
 

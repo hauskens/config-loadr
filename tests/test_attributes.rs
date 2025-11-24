@@ -1,4 +1,4 @@
-use config_loadr::{Load, define_config};
+use config_loadr::define_config;
 
 // Test: Allow missing docs
 define_config! {
@@ -16,6 +16,6 @@ define_config! {
 fn test_allow_missing_docs() {
     // This should compile and run without requiring #[doc] on all fields
     let config = ConfigWithoutDocs::load();
-    assert_eq!(*config.port, 8080);
-    assert_eq!(*config.host, "localhost");
+    assert_eq!(config.port, 8080);
+    assert_eq!(config.host, "localhost");
 }

@@ -68,7 +68,12 @@
           ];
 
         craneLib = crane.mkLib pkgs;
-        src = craneLib.cleanCargoSource ./.;
+        src = lib.cleanSourceWith {
+          src = craneLib.path ./.;
+          filter = path: type:
+            (lib.hasSuffix "\.env" path) ||
+            (craneLib.filterCargoSources path type);
+        };
 
         # Common arguments
         commonArgs = {
