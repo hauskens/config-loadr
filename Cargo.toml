@@ -5,12 +5,13 @@ members = ["macros"]
 version = "0.9.0"
 edition = "2021"
 license = "MIT"
-authors = ["Victor Fuentes"]
+license-file = "LICENSE"
+authors = ["Hauskens"]
 description = "Type-safe configuration loading from environment variables with helpful errors and documentation generation"
 repository = "https://github.com/hauskens/config-loadr"
 homepage = "https://github.com/hauskens/config-loadr"
-documentation = "https://docs.rs/config-loadr"
-keywords = ["config", "environment", "env", "dotenv", "configuration"]
+documentation = "https://github.com/hauskens/config-loadr/blob/main/README.md"
+keywords = ["config", "environment", "macro", "dotenv", "configuration"]
 categories = ["config", "development-tools"]
 readme = "README.md"
 exclude = [
@@ -21,6 +22,9 @@ exclude = [
   "target",
   "flake.*",
   "result",
+  "/src/cli.rs",
+  ".envrc",
+  "test.env",
 ]
 
 [package]
@@ -28,6 +32,17 @@ name = "config-loadr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+license-file.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+exclude.workspace = true
+
 
 [lib]
 crate-type = ["rlib"]

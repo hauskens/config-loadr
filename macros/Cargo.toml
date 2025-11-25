@@ -3,11 +3,16 @@ name = "config-loadr-macros"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+license-file.workspace = true
 authors.workspace = true
 description = "Procedural macros for config-loadr"
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme.workspace = true
+exclude.workspace = true
 
 [lib]
 proc-macro = true
