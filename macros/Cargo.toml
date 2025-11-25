@@ -2,7 +2,6 @@
 name = "config-loadr-macros"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
 license-file.workspace = true
 authors.workspace = true
 description = "Procedural macros for config-loadr"
